@@ -4,9 +4,8 @@ import ssl
 from typing import cast
 
 from pyVim.connect import SmartConnect
+# pyVmomi vim import required in this format, see https://github.com/vmware/pyvmomi/issues/1025
 from pyVmomi import vim
-
-# Import required in this format, see https://github.com/vmware/pyvmomi/issues/1025
 
 
 class VConn:

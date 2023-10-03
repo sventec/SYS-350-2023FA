@@ -8,8 +8,7 @@ from rich import prompt
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-
-from sys350_automation import VConn
+from sysvm import VConn
 
 # pyright: reportInvalidStringEscapeSequence=false
 
@@ -112,7 +111,7 @@ def search_vms(vc: VConn, query: str | None = None):
 
 def main():
     """CLI application for SYS-350 pyvmomi automation."""
-    print(Panel("[bold]SYS-350 pyvmomi automation tool[/bold]", expand=False))
+    print(Panel("[bold][cyan]sysvm[/cyan]: SYS-350 pyvmomi automation tool[/bold]", expand=False))
     vc = VConn()
     print("\[-] Connecting to vCenter, enter password below:")
     try:
