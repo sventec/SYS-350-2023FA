@@ -1,6 +1,5 @@
 # SYS-350 pyvmomi automation
 import configparser
-import re
 import ssl
 from typing import cast
 
@@ -87,8 +86,7 @@ class VConn:
             vms = [vm for vm in container.view if vm.name == search]
         else:
             # Search for VMs with name containing search string
-            search_re = re.compile(f"^{search}$")
-            vms = [vm for vm in container.view if re.match(search_re, str(vm.name))]
+            vms = [vm for vm in container.view if search in str(vm.name)]
 
         container.Destroy()
         # This can be cast to VirtualMachine objects (instead of ManagedObject) as the view is filtering on that type
