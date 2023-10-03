@@ -5,16 +5,17 @@ including the functionality required by the course's milestone.
 
 ## Installation & Usage
 
-Clone this repository locally, and continue with one of the following methods.
+Python >= 3.10 is required. Clone this repository locally, and continue with
+one of the following methods.
 
 ### Using pdm
 
 If [pdm](https://pdm.fming.dev/latest/#installation) is already installed
 and/or being used, simply run `pdm install` in the project root to create a
-local virtual environment and install `sysvmomi` to it.
+local virtual environment and install `sysvm` to it.
 
 Source the virtual environment with the following command, and invoke the tool
-with `sysvmomi`:
+with `sysvm`:
 
 ```bash
 eval $(pdm venv activate)
@@ -29,5 +30,5 @@ environment. Install the following:
 - `pyvim`
 - `rich`
 
-Once installation is complete, invoke `python3 sys350_automation/main.py`.
+Once installation is complete, invoke `python3 sysvm/main.py`.
 

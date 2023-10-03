@@ -1,7 +1,7 @@
 [project]
-name = "sys350-automation"
+name = "sysvm"
 version = "0.1.0"
-description = "vSphere automation for SYS-350, Fall 2023"
+description = "vSphere automation with pyvmomi for SYS-350, Fall 2023"
 authors = [
     {name = "Reed Simon", email = "reed.simon@mymail.champlain.edu"},
 ]
@@ -15,7 +15,7 @@ readme = "README.md"
 license = {text = "MIT"}
 
 [project.scripts]
-sysvmomi = "sys350_automation.main:main"
+sysvm = "sysvm.main:main"
 
 [build-system]
 requires = ["pdm-backend"]
