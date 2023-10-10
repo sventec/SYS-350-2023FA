@@ -1,55 +1,159 @@
 """CLI application for SYS-350 pyvmomi automation."""
 import enum
 import sys
+from abc import abstractmethod
+from datetime import datetime
+from textwrap import dedent
 
 from pyVmomi import vim
 from rich import print
 from rich import prompt
 from rich.console import Console
 from rich.panel import Panel
+from rich.pretty import pprint
 from rich.table import Table
+
 from sysvm import VConn
 
 # pyright: reportInvalidStringEscapeSequence=false
 
 
-class Command(enum.Enum):
+class BaseCommand(enum.Enum):
+    @staticmethod
+    @abstractmethod
+    def help_text() -> str:
+        """Return command-type specific help text here."""
+        ...
+
+    @classmethod
+    def get_command(cls):
+        """Read and parse user commands."""
+        while True:
+            cmd = prompt.Prompt.ask(
+                "\n[blue]\[?][/blue] Enter your command",
+                default="?",
+                choices=[v.value for v in cls],
+            )
+            if cmd == "?":
+                print("\[-] Available commands:")
+                print(cls.help_text())
+            elif cmd == "q":
+                print("[bold]Goodbye![/bold]")
+                sys.exit()
+            else:
+                try:
+                    return cls(cmd.lower().strip())
+                except ValueError:
+                    print(f"[red]\[!] {cmd.strip()} is not a valid command![/red]")
+
+
+class Command(BaseCommand):
     LIST_INFO = "l"
     SEARCH = "s"
     QUIT = "q"
     _HELP = "?"
 
+    def do_command(self, vc: VConn):
+        """Perform operations for given command."""
+        match self:
+            case Command.LIST_INFO:
+                list_info(vc)
+            case Command.SEARCH:
+                search_vms(vc)
 
-def get_command() -> Command:
-    """Read and parse user commands."""
-    while True:
-        cmd = prompt.Prompt.ask(
-            "\n[blue]\[?][/blue] Enter your command",
-            default="?",
-            choices=[v.value for v in Command],
+    @staticmethod
+    def help_text():
+        return dedent(
+            """\
+            \[-] [bold]l[/bold]: [italic]List vCenter connection info[/italic]
+            \[-] [bold]s[/bold]: [italic]Search for VM[/italic]
+            \[-] [bold]q[/bold]: [italic]Quit[/italic]"""
         )
-        if cmd == "?":
-            print("\[-] Available commands:")
-            print("\[-] [bold]l[/bold]: [italic]List vCenter connection info[/italic]")
-            print("\[-] [bold]s[/bold]: [italic]Search for VM[/italic]")
-            print("\[-] [bold]q[/bold]: [italic]Quit[/italic]")
-        else:
-            try:
-                return Command(cmd.lower().strip())
-            except ValueError:
-                print(f"[red]\[!] {cmd.strip()} is not a valid command![/red]")
 
 
-def do_command(cmd: Command, vc: VConn):
-    """Perform operations for given command."""
-    match cmd:
-        case Command.QUIT:
-            print("[bold]Goodbye![/bold]")
-            sys.exit()
-        case Command.LIST_INFO:
-            list_info(vc)
-        case Command.SEARCH:
-            search_vms(vc)
+class VMCommand(BaseCommand):
+    POWER_ON = "on"
+    POWER_OFF = "off"
+    SNAPSHOT = "s"
+    RESTORE_LATEST = "r"
+    # FULL_CLONE = "fc"
+    # LINKED_CLONE = "lc"
+    CHANGE_NETWORK = "n"
+    DELETE_FROM_DISK = "d"
+    VIEW_INFO = "v"
+    COMMAND = "c"
+    QUIT = "q"
+    _HELP = "?"
+
+    def do_command(self, vc: VConn, vms: list[vim.VirtualMachine]):
+        """Perform operations on given VM(s)."""
+        match self:
+            case VMCommand.POWER_ON:
+                if prompt.Confirm.ask("[blue]\[?][/blue] Really power on?"):
+                    vc.vms_power(vms, True)
+                    print("[green]\[+][/green] Powered on.")
+            case VMCommand.POWER_OFF:
+                if prompt.Confirm.ask("[blue]\[?][/blue] Really power off?"):
+                    vc.vms_power(vms, False)
+                    print("[green]\[+][/green] Powered off.")
+            case VMCommand.SNAPSHOT:
+                c = Console()
+                # Check if any VMs aren't powered off
+                if any(vm.runtime.powerState != "poweredOff" for vm in vms):
+                    if not prompt.Confirm.ask(
+                        "[blue]\[?][/blue] Not all VMs are powered off. Continuing will power off selected VMs."
+                    ):
+                        # Exit to command selection
+                        c.print("\[-] Cancelling snapshot creation.")
+                        vm_command = VMCommand.get_command()
+                        vm_command.do_command(vc, vms)
+                    # Power off VMs
+                    vc.vms_power(vms, False)
+                    c.print("[green]\[+][/green] Powered off.")
+                # Create snapshot
+                name = prompt.Prompt.ask(
+                    "Name for the snapshot, defaults to ISO8601 date",
+                    default=datetime.now().replace(microsecond=0).isoformat(),
+                    show_default=True,
+                )
+                vc.vms_snapshot(vms, name)
+                c.print(
+                    f"[green]\[+][/green] Snapshot '{name}' created on {len(vms)} VMs.",
+                    highlight=False,
+                )
+            case VMCommand.RESTORE_LATEST:
+                ...
+            case VMCommand.CHANGE_NETWORK:
+                ...
+            case VMCommand.DELETE_FROM_DISK:
+                ...
+            case VMCommand.VIEW_INFO:
+                for vm in vms:
+                    print()
+                    _list_vm_info(vm)
+            case VMCommand.COMMAND:
+                cmd = Command.get_command()
+                cmd.do_command(vc)
+            case _:
+                print("[red]\[!][/red] Command not yet implemented!")
+
+        # Allow for multiple subsequent operations on same VM set
+        vm_command = VMCommand.get_command()
+        vm_command.do_command(vc, vms)
+
+    @staticmethod
+    def help_text():
+        return dedent(
+            """\
+            \[-] [b]on[/b]:  [i]Power on[/i]
+            \[-] [b]off[/b]: [i]Power off[/i]
+            \[-] [b]s[/b]:   [i]Snapshot[/i]
+            \[-] [b]r[/b]:   [i]Restore latest snapshot[/i]
+            \[-] [b]n[/b]:   [i]Change attached network[/i]
+            \[-] [b]d[/b]:   [i]Delete from disk[/i]
+            \[-] [b]v[/b]:   [i]View VM info[/i]
+            \[-] [b]c[/b]:   [i]Back to top-level commands[/i]"""
+        )
 
 
 def _pprint_dict(d: dict, title: str = "") -> None:
@@ -78,6 +182,7 @@ def list_info(vc: VConn):
         "Source IP": vc.vcenter.content.sessionManager.currentSession.ipAddress,
     }
     # Format and print info, padding keys to consistent length
+    print()
     _pprint_dict(vc_info, title="vCenter Connection Info")
 
 
@@ -103,15 +208,42 @@ def search_vms(vc: VConn, query: str | None = None):
         )
     # This is kept as list[ManagedObject] for later functionality, e.g. returning VMs or performing operations on them
     vms = vc.get_vms(query.strip() or "", exact=False)
-    print(f"[green]\[+][/green] {len(vms)} results returned, listing info.")
-    for vm in vms:
+
+    # Check that we got results back
+    print(f"[green]\[+][/green] {len(vms)} results returned.")
+    if len(vms) == 0:
+        print("\[-] No operations possible on empty VM set.")
+        return
+
+    # Print a list of matched VM names, if a reasonable size
+    if len(vms) <= 50:
+        print("[green]\[+][/green] Matched VMs: ")
+        pprint([vm.name for vm in vms])
         print()
-        _list_vm_info(vm)
+    else:
+        print("\[-] More than 50 VMs, skipping display of names...")
+
+    # List VM info if desired
+    if prompt.Confirm.ask(
+        f"[blue]\[?][/blue] List VM details for all {len(vms)} result(s)?"
+    ):
+        for vm in vms:
+            print()
+            _list_vm_info(vm)
+
+    # Optionally perform tasks on VM(s)
+    vm_command = VMCommand.get_command()
+    vm_command.do_command(vc, vms)
 
 
 def main():
     """CLI application for SYS-350 pyvmomi automation."""
-    print(Panel("[bold][cyan]sysvm[/cyan]: SYS-350 pyvmomi automation tool[/bold]", expand=False))
+    print(
+        Panel(
+            "[bold][cyan]sysvm[/cyan]: SYS-350 pyvmomi automation tool[/bold]",
+            expand=False,
+        )
+    )
     vc = VConn()
     print("\[-] Connecting to vCenter, enter password below:")
     try:
@@ -121,8 +253,8 @@ def main():
         sys.exit(1)
     print(f"[green]\[+][/green] Connection established to {vc.hostname}.")
     while True:
-        cmd = get_command()
-        do_command(cmd, vc)
+        cmd = Command.get_command()
+        cmd.do_command(vc)
 
 
 if __name__ == "__main__":

@@ -4,8 +4,10 @@ import ssl
 from typing import cast
 
 from pyVim.connect import SmartConnect
-# pyVmomi vim import required in this format, see https://github.com/vmware/pyvmomi/issues/1025
 from pyVmomi import vim
+from pyVmomi import vmodl
+
+# pyVmomi vim import required in the above format, see https://github.com/vmware/pyvmomi/issues/1025
 
 
 class VConn:
@@ -90,3 +92,78 @@ class VConn:
         container.Destroy()
         # This can be cast to VirtualMachine objects (instead of ManagedObject) as the view is filtering on that type
         return cast(list[vim.VirtualMachine], vms)
+
+    # Adapted from github://vmware/pyvmomi-community-samples/tools/tasks.py
+    # https://github.com/vmware/pyvmomi-community-samples/blob/master/samples/tools/tasks.py
+    def _wait_for_tasks(self, tasks):
+        """Return after all tasks are complete."""
+        property_collector = self.vcenter.content.propertyCollector
+        task_list = [str(task) for task in tasks]
+        # Create filter
+        obj_specs = [
+            vmodl.query.PropertyCollector.ObjectSpec(obj=task) for task in tasks
+        ]
+        property_spec = vmodl.query.PropertyCollector.PropertySpec(
+            type=vim.Task, pathSet=[], all=True
+        )
+        filter_spec = vmodl.query.PropertyCollector.FilterSpec()
+        filter_spec.objectSet = obj_specs
+        filter_spec.propSet = [property_spec]
+        pcfilter = property_collector.CreateFilter(filter_spec, True)
+        try:
+            version, state = "", None
+            # Loop looking for updates till the state moves to a completed state.
+            while task_list:
+                update = property_collector.WaitForUpdates(version)
+                for filter_set in update.filterSet:
+                    for obj_set in filter_set.objectSet:
+                        task = obj_set.obj
+                        for change in obj_set.changeSet:
+                            if change.name == "info":
+                                state = change.val.state  # type: ignore
+                            elif change.name == "info.state":
+                                state = change.val
+                            else:
+                                continue
+
+                            if str(task) not in task_list:
+                                continue
+
+                            if state == vim.TaskInfo.State.success:  # type: ignore
+                                # Remove task from taskList
+                                task_list.remove(str(task))
+                            elif state == vim.TaskInfo.State.error:  # type: ignore
+                                raise task.info.error
+                # Move to next version
+                version = update.version
+        finally:
+            if pcfilter:
+                pcfilter.Destroy()
+
+    def vms_power(self, vms: list[vim.VirtualMachine], power_state: bool):
+        """Modify VMs power state.
+
+        Args:
+            vms: List of VirtualMachine objects to change the power state for.
+            power_state: Desired power state. True to Power On, False to Power Off.
+        """
+        tasks = [vm.PowerOn() if power_state is True else vm.PowerOff() for vm in vms]  # type: ignore[reportGeneralTypeIssues]
+        self._wait_for_tasks(tasks)
+
+    def vms_snapshot(self, vms: list[vim.VirtualMachine], name: str):
+        """Snapshot VMs.
+
+        Args:
+            vms: List of VirtualMachine objects to snapshot.
+            name: Name to be used for the snapshot(s).
+        """
+        tasks = [
+            vm.CreateSnapshot(
+                name,
+                description="Created with sysvm",
+                memory=False,
+                quiesce=False,
+            )
+            for vm in vms
+        ]
+        self._wait_for_tasks(tasks)
