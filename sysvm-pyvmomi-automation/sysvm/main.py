@@ -122,11 +122,35 @@ class VMCommand(BaseCommand):
                     highlight=False,
                 )
             case VMCommand.RESTORE_LATEST:
-                ...
+                vc.vms_restore_snapshot(vms)
+                print("[green]\[+][/green] Restored latest snapshot.")
             case VMCommand.CHANGE_NETWORK:
-                ...
+                # Get available networks
+                vmnets = [net.name for net in vc.get_vmnets()]
+                for vm in vms:
+                    print(f"\[-] Changing network adapter for {vm.name}")
+                    # Get desired interface
+                    nics = vc.vm_get_nics(vm)
+                    interface = prompt.Prompt.ask(
+                        "Select NIC to change",
+                        choices=[nic.deviceInfo.label for nic in nics],
+                    )
+                    # Get desired network
+                    dest_network = prompt.Prompt.ask(
+                        "Select desired network",
+                        default="VM Network",
+                        show_default=True,
+                        choices=vmnets,
+                    )
+                    # Change network
+                    vc.vm_change_network(vm, interface, dest_network)
+                    print(
+                        f"[green]\[+][/green] Changed {vm.name} adapter {interface} to network {dest_network}."
+                    )
             case VMCommand.DELETE_FROM_DISK:
-                ...
+                if prompt.Confirm.ask("[blue]\[?][/blue] Really delete?"):
+                    vc.vms_destroy(vms)
+                    print("[green]\[+][/green] Deleted from disk.")
             case VMCommand.VIEW_INFO:
                 for vm in vms:
                     print()
@@ -137,9 +161,10 @@ class VMCommand(BaseCommand):
             case _:
                 print("[red]\[!][/red] Command not yet implemented!")
 
-        # Allow for multiple subsequent operations on same VM set
-        vm_command = VMCommand.get_command()
-        vm_command.do_command(vc, vms)
+        # Allow for multiple subsequent operations on same VM set, unless set was deleted
+        if not self == VMCommand.DELETE_FROM_DISK:
+            vm_command = VMCommand.get_command()
+            vm_command.do_command(vc, vms)
 
     @staticmethod
     def help_text():
@@ -225,7 +250,8 @@ def search_vms(vc: VConn, query: str | None = None):
 
     # List VM info if desired
     if prompt.Confirm.ask(
-        f"[blue]\[?][/blue] List VM details for all {len(vms)} result(s)?"
+        f"[blue]\[?][/blue] List VM details for all {len(vms)} result(s)?",
+        default=False,
     ):
         for vm in vms:
             print()

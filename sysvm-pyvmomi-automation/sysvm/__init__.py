@@ -167,3 +167,77 @@ class VConn:
             for vm in vms
         ]
         self._wait_for_tasks(tasks)
+
+    def vms_restore_snapshot(self, vms: list[vim.VirtualMachine]):
+        """Restore VMs to latest snapshot.
+
+        Args:
+            vms: List of VirtualMachine objects to restore latest snapshot on.
+        """
+        tasks = [vm.RevertToCurrentSnapshot(suppressPowerOn=False) for vm in vms]  # type: ignore[reportGeneralTypeIssues]
+        self._wait_for_tasks(tasks)
+        # return [vm.snapshot.name for vm in vms]
+
+    def vms_destroy(self, vms: list[vim.VirtualMachine]):
+        """Delete VMs from disk.
+
+        Args:
+            vms: List of VirtualMachine objects to delete from disk.
+        """
+        # Power off before destroying
+        if any(vm.runtime.powerState != "poweredOff" for vm in vms):
+            self._wait_for_tasks([vm.PowerOff() for vm in vms if vm.runtime.powerState != "poweredOff"])
+        tasks = [vm.Destroy() for vm in vms]
+        self._wait_for_tasks(tasks)
+
+    def get_vmnets(self) -> list[vim.Network]:
+        """Retrieve list of available virtual networks in the environment."""
+        folder = self.vcenter.content.rootFolder
+        # Recursively get references to all VMs, starting from the root folder
+        container = self.vcenter.content.viewManager.CreateContainerView(
+            folder, [vim.Network], recursive=True
+        )
+        nets = [net for net in container.view]
+        container.Destroy()
+        return cast(list[vim.Network], nets)
+
+    def vm_get_nics(
+        self, vm: vim.VirtualMachine
+    ) -> list[vim.vm.device.VirtualEthernetCard]:
+        """Retrieve list of NICs from VM.
+
+        Args:
+            vm: VirtualMachine object to retrieve NICs for.
+        """
+        # Some code adapted from:
+        # https://github.com/vmware/pyvmomi-community-samples/blob/master/samples/change_vm_vif.py
+        return [
+            device
+            for device in vm.config.hardware.device
+            if isinstance(device, vim.vm.device.VirtualEthernetCard)
+        ]
+
+    def vm_change_network(
+        self, vm: vim.VirtualMachine, interface_name: str, network_name: str
+    ):
+        # Retrieve interface and network by name
+        interface = [
+            nic
+            for nic in self.vm_get_nics(vm)
+            if nic.deviceInfo.label == interface_name
+        ][0]
+        network = [net for net in self.get_vmnets() if net.name == network_name][0]
+        # Code adapted from:
+        # https://github.com/vmware/pyvmomi-community-samples/blob/master/samples/change_vm_vif.py
+        nicspec = vim.vm.device.VirtualDeviceSpec()
+        nicspec.operation = vim.vm.device.VirtualDeviceSpec.Operation.edit
+        nicspec.device = interface
+        nicspec.device.wakeOnLanEnabled = True
+        nicspec.device.backing = vim.vm.device.VirtualEthernetCard.NetworkBackingInfo()
+        nicspec.device.backing.network = network
+        nicspec.device.backing.deviceName = network_name
+        nicspec.device.connectable = vim.vm.device.VirtualDevice.ConnectInfo()
+        nicspec.device.connectable.startConnected = True
+        nicspec.device.connectable.allowGuestControl = True
+        config_spec = vim.vm.ConfigSpec(deviceChange=[nicspec])
+        self._wait_for_tasks([vm.Reconfigure(config_spec)])
